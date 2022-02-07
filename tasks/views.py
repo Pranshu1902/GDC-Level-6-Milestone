@@ -1,14 +1,5 @@
-from re import search
-from turtle import title
-from wsgiref.simple_server import demo_app
-from xml.dom import ValidationErr
-
-import django
-from django.core.exceptions import ValidationError
-from django.forms import ModelForm, ValidationError
-from django.http import HttpResponse, HttpResponseRedirect, request
-from django.shortcuts import render
-from django.views import View
+from django.forms import ModelForm
+from django.http import HttpResponseRedirect
 from django.views.generic.detail import DetailView
 from django.views.generic.edit import CreateView, UpdateView, DeleteView
 from django.views.generic.list import ListView
@@ -23,6 +14,31 @@ from django.contrib.auth.views import LoginView
 # redirect to login page whenever the server is restarted
 def redirect(request):
     return HttpResponseRedirect("/user/login")
+
+
+
+
+# cascade priority
+def cascade(priority, user):
+    if Task.objects.filter(user = user, completed=False, deleted=False, priority=priority).exists():
+        p = priority
+
+        # saving all data in variable: "data"
+        data = Task.objects.select_for_update().filter(deleted=False, user = user, completed=False).order_by('priority')
+        current = p
+
+        updated = []
+
+        for task in data:
+            if task.priority == current:
+                task.priority = current + 1
+                current += 1
+                updated.append(task)
+            else:
+                break
+        Task.objects.bulk_update(updated, ['priority'])
+
+
 
 
 
@@ -42,13 +58,11 @@ class UserCreateView(CreateView):
     success_url = "/user/login"
 
 
-
-
 class TaskCreateForm(ModelForm):
 
     class Meta:
         model = Task
-        fields = ["title", "description", "completed", "priority"]
+        fields = ['title', 'description', 'completed', 'priority']
 
 
 
@@ -73,105 +87,34 @@ class GenericTaskUpdateView(AuthorisedTaskManager, UpdateView):
     success_url = "/home/all"
 
     def form_valid(self, form):
-        user = self.request.user
-        p = form.cleaned_data["priority"]
-
-        # basic validation
-        if p<=0:
-            raise ValidationError("Priority cannot be negative")
-
-        # saving all data in variable: "data"
-        data = Task.objects.filter(deleted=False, user = user)
-
-        # setting default value for variable: adjust_priority
-        adjust_priority = False
-
-        # looping through all tasks to check if priority is already taken
-        for el in data:
-            if el.priority == p:
-                adjust_priority = True
-                break
-        
-        # if priority is already taken, adjust it
-        if adjust_priority:
-            current = p
-
-            # looping through all tasks to find the next available priority
-            for task in data.iterator():
-                if task.priority == current:
-                    current += 1
-                else:
-                    break
-            
-            # looping through it backwards to adjust the priority of tasks
-            for i in range(current, p, -1):
-                Task.objects.filter(deleted=False, priority=i-1, user=user).update(priority=i)
-
-            # save and redirect
-            form.save()
-            return HttpResponseRedirect("/home/all")
-
-        else:  # priority is unique
-            form.save()
-            return HttpResponseRedirect("/home/all")
+        new_priority = form.cleaned_data.get('priority')
+        cascade(new_priority, self.request.user)
+        form.save()
+        self.object = form.save()
+        self.object.user = self.request.user
+        self.object.save()
+        return HttpResponseRedirect('/home/all')
 
 
 
 
-class GenericTaskCreateView(CreateView):
+
+
+class GenericTaskCreateView(AuthorisedTaskManager, CreateView):
     form_class = TaskCreateForm
     template_name = "task_create.html"
     success_url = "/home/all"
 
     def form_valid(self, form):
-        user = self.request.user
-        p = form.cleaned_data["priority"]
+        new_priority = form.cleaned_data.get('priority')
+        cascade(new_priority, self.request.user)
+        form.save()
+        self.object = form.save()
+        self.object.user = self.request.user
+        self.object.save()
+        return HttpResponseRedirect('/home/all')
 
-        # basic validation
-        if p<=0:
-            raise ValidationError("Priority cannot be negative")
 
-        # saving all data in variable: "data"
-        data = Task.objects.filter(deleted=False, user = user)
-
-        # setting default value for variable: adjust_priority
-        adjust_priority = False
-
-        # looping through all tasks to check if priority is already taken
-        for el in data:
-            if el.priority == p:
-                adjust_priority = True
-                break
-        
-        # if priority is already taken, adjust it
-        if adjust_priority:
-            current = p
-
-            # looping through all tasks to find the next available priority
-            for task in data.iterator():
-                if task.priority == current:
-                    current += 1
-                else:
-                    break
-            
-            # looping through it backwards to adjust the priority of tasks
-            for i in range(current, p, -1):
-                Task.objects.filter(deleted=False, priority=i-1, user=user).update(priority=i)
-
-            # save and redirect
-            form.save()
-            
-            self.object = form.save()
-            self.object.user = self.request.user
-            self.object.save()
-            return HttpResponseRedirect("/home/all")
-
-        else:  # priority is unique
-            form.save()
-            self.object = form.save()
-            self.object.user = self.request.user
-            self.object.save()
-            return HttpResponseRedirect("/home/all")
 
 
 
