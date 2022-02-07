@@ -24,7 +24,7 @@ def cascade(priority, user):
         p = priority
 
         # saving all data in variable: "data"
-        data = Task.objects.select_for_update().filter(deleted=False, user = user, completed=False).order_by('priority')
+        data = Task.objects.select_for_update().filter(deleted=False, user = user, completed=False, priority__gte=priority).order_by('priority')
         current = p
 
         updated = []
@@ -87,8 +87,10 @@ class GenericTaskUpdateView(AuthorisedTaskManager, UpdateView):
     success_url = "/home/all"
 
     def form_valid(self, form):
+        task = Task.objects.get(id=self.object.id)
         new_priority = form.cleaned_data.get('priority')
-        cascade(new_priority, self.request.user)
+        if task.priority != new_priority:
+            cascade(new_priority, self.request.user)
         form.save()
         self.object = form.save()
         self.object.user = self.request.user
